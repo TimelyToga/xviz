@@ -34,7 +34,7 @@ export default class Stylesheet {
 
     this.properties = {};
     rules.forEach(rule => {
-      for (const key in rule.properties) {
+      for (const key in Object.keys(rule.properties)) {
         let p = this.properties[key];
         if (!p) {
           p = [];
@@ -58,7 +58,7 @@ export default class Stylesheet {
   getProperty(propertyName, state = {}) {
     // inline style override any generic rules
     const inlineProp = state.base && state.base.style && state.base.style[propertyName];
-    if (inlineProp !== undefined) {
+    if (inlineProp !== undefined && inlineProp !== null) {
       return XVIZStyleProperty.formatValue(propertyName, inlineProp);
     }
 
@@ -149,7 +149,7 @@ export default class Stylesheet {
   _parseProperties(properties) {
     const result = {};
 
-    for (const key in properties.style) {
+    for (const key in Object.keys(properties.style)) {
       result[key] = new XVIZStyleProperty(key, properties.style[key]);
     }
     return result;

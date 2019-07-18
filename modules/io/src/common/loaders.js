@@ -17,6 +17,7 @@ import {GLTFParser} from '@loaders.gl/gltf';
 import {XVIZ_GLTF_EXTENSION} from './constants';
 import {TextDecoder} from './text-encoding';
 import {MAGIC_PBE1, XVIZ_PROTOBUF_MESSAGE} from './protobuf-support';
+import {Enum, Type, MapField} from 'protobufjs';
 
 // XVIZ Type constants
 const XVIZ_TYPE_PATTERN = /"type":\s*"(xviz\/\w*)"/;
@@ -198,6 +199,53 @@ function getPBEXVIZType(arrayBuffer) {
   return envelope.type;
 }
 
+function stringifyEnums(msg, pbType) {
+  const type = pbType || msg.$type; 
+
+  if (msg && type && type.fields) {
+    const fields = type.fields;
+    for (const fieldName in fields) {
+      const field = fields[fieldName];
+      if (field && msg[field.name]) {
+        if (!field.resolvedType && field.repeated && msg[field.name].length === 0) {
+          msg[field.name] = undefined;
+          delete msg[field.name];
+        } else if (field.resolvedType) {
+          if (field.resolvedType instanceof Enum) {
+            if (field.repeated) {
+              if (msg[field.name].length === 0) {
+                msg[field.name] = undefined;
+                delete msg[field.name];
+              } else {
+                msg[field.name] = msg[field.name].map(entry => field.resolvedType.valuesById[entry]);
+              }
+            } else {
+              msg[field.name] = field.resolvedType.valuesById[msg[field.name]];
+            }
+            // TODO doesn't handle repeated enums
+          } else if (field instanceof MapField) {
+            for (const key of Object.keys(msg[field.name])) { 
+              msg[field.name][key] = stringifyEnums(msg[field.name][key], field.resolvedType);
+            }
+          } else if (field.resolvedType instanceof Type) {
+            if (field.repeated) {
+              if (msg[field.name].length === 0) {
+                msg[field.name] = undefined;
+                delete msg[field.name];
+              } else {
+                msg[field.name] = msg[field.name].map(entry => stringifyEnums(entry, field.resolvedType));
+              }
+            } else {
+              msg[field.name] = stringifyEnums(msg[field.name], field.resolvedType);
+            }
+          }
+        }
+      }
+    }
+  }
+  return msg;
+}
+
 // TODO: unpackEnvelop produces namespace, type data
 export function parsePBEXVIZ(arrayBuffer) {
   const strippedBuffer = new Uint8Array(arrayBuffer, 4);
@@ -211,21 +259,24 @@ export function parsePBEXVIZ(arrayBuffer) {
   switch (envelope.type) {
     case 'xviz/metadata':
       // TODO: support enum integers when parsing to avoid costly toObject() call
-      // xviz.data = XVIZ_PROTOBUF_MESSAGE.Metadata.decode(envelope.data.value);
       const tmpMeta = XVIZ_PROTOBUF_MESSAGE.Metadata.decode(envelope.data.value);
+      xviz.data = stringifyEnums(tmpMeta);
+      // const tmpMeta = XVIZ_PROTOBUF_MESSAGE.Metadata.decode(envelope.data.value);
       // This toObject is required to change enums to strings for now
-      xviz.data = XVIZ_PROTOBUF_MESSAGE.Metadata.toObject(tmpMeta, {
-        enums: String
-      });
+      // xviz.data = XVIZ_PROTOBUF_MESSAGE.Metadata.toObject(tmpMeta, {
+      //  enums: String
+      // });
       break;
     case 'xviz/state_update':
       // TODO: support enum integers when parsing to avoid costly toObject() call
-      // xviz.data = XVIZ_PROTOBUF_MESSAGE.StateUpdate.decode(envelope.data.value);
       const tmpState = XVIZ_PROTOBUF_MESSAGE.StateUpdate.decode(envelope.data.value);
+      xviz.data = stringifyEnums(tmpState);
+      // xviz.data = { update_type: "COMPLETE_STATE", updates: [{timestamp: tmpState.updates[0].timestamp}]};
+      // const tmpState = XVIZ_PROTOBUF_MESSAGE.StateUpdate.decode(envelope.data.value);
       // This toObject is required to change enums to strings for now
-      xviz.data = XVIZ_PROTOBUF_MESSAGE.StateUpdate.toObject(tmpState, {
-        enums: String
-      });
+      // xviz.data = XVIZ_PROTOBUF_MESSAGE.StateUpdate.toObject(tmpState, {
+      //   enums: String
+      // });
       break;
     default:
       throw new Error(`Unknown Message type ${envelope.type}`);

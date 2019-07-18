@@ -1,0 +1,40 @@
+// --------------------------------------------------------
+// WARNING: XVIZ Protobuf files are unstable, do not use
+// --------------------------------------------------------
+
+syntax = "proto3";
+
+package xviz.v2;
+
+option csharp_namespace = "xviz.V2";
+option go_package = "v2pb";
+option java_multiple_files = true;
+option java_outer_classname = "PanelProto";
+option java_package = "com.xviz.v2";
+option objc_class_prefix = "XVIZ";
+option php_namespace = "Xviz\\V2";
+
+message Panel {
+  enum PanelType {
+    PANEL_TYPE_INVALID = 0;
+    PANEL = 1;
+    TREETABLE = 2;
+    CONTAINER = 3;
+    METRIC = 4;
+    VIDEO = 5;
+    PLOT = 6;
+  }
+
+  PanelType type = 1;
+  string title = 2;
+  string description = 3;
+  string name = 4;
+  string layout = 5;
+  repeated string streams = 6;
+  string stream = 7;
+  repeated string cameras = 8;
+  string independentVariable = 9;
+  repeated string dependentVariables = 10;
+  bool displayObjectId = 11;
+  repeated Panel children = 12;
+}

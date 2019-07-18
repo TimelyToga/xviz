@@ -18,7 +18,8 @@
   `message` refers to the raw message received via webSocket.onmessage
  * `data` refers to pre-processed data objects (blob, arraybuffer, JSON object)
  */
-/* global Blob, Uint8Array */
+/* global Blob, console, Uint8Array */
+/* eslint-disable no-console */
 import {XVIZ_MESSAGE_TYPE} from '../constants';
 import {XVIZData} from '@xviz/io';
 import {parseLogMetadata} from './parse-log-metadata';
@@ -26,6 +27,12 @@ import {parseVideoMessageV1} from './parse-video-message-v1';
 import parseTimesliceDataV1 from './parse-timeslice-data-v1';
 import parseTimesliceDataV2 from './parse-timeslice-data-v2';
 import {getXVIZConfig} from '../config/xviz-config';
+
+import {Stats} from 'probe.gl';
+const stats = new Stats({id: 'xviz'});
+const decodeTimer = stats.get('decode');
+const parseTimer = stats.get('parse');
+
 
 // Post processes a stream message to make it easy to use for JavaScript applications
 export function parseXVIZMessageSync(message, onResult, onError, opts) {
@@ -38,8 +45,11 @@ export function parseXVIZMessageSync(message, onResult, onError, opts) {
   }
 
   try {
+
+    decodeTimer.timeStart();
     const xvizData = new XVIZData(message);
     const xvizMsg = xvizData.message();
+    decodeTimer.timeEnd();
 
     // Non-xviz messages will return null
     if (xvizMsg) {
@@ -47,8 +57,11 @@ export function parseXVIZMessageSync(message, onResult, onError, opts) {
 
       const v2Type = xvizMsg.type || undefined;
 
+      parseTimer.timeStart();
       const result = parseXVIZData(data, {...opts, v2Type});
+      parseTimer.timeEnd();
 
+      console.log(`${decodeTimer.lastTiming.toFixed(3)} ${decodeTimer.getAverageTime().toFixed(3)} ${parseTimer.lastTiming.toFixed(3)} ${parseTimer.getAverageTime().toFixed(3)}`);
       onResult(result);
     }
   } catch (error) {

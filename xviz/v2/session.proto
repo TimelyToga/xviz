@@ -18,6 +18,7 @@ import "google/protobuf/struct.proto";
 import "xviz/v2/core.proto";
 import "xviz/v2/options.proto";
 import "xviz/v2/style.proto";
+import "xviz/v2/panel.proto";
 
 // NOTE: this enum purposely not scoped inside Start to avoid naming conflict
 // with "log" field and "log" type
@@ -92,7 +93,7 @@ message Metadata {
   map<string, StreamMetadata> streams = 2;
   map<string, CameraInfo> cameras = 3;
   map<string, string> stream_aliases = 4;
-  map<string, UIPanelInfo> ui_config = 5;
+  map<string, Panel> ui_config = 5;
   LogInfo log_info = 6;
 }
 
