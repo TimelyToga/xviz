@@ -4,117 +4,122 @@
 
 # Summary
 
-Propose the addition of a per-stream metadata property for primitives only that will mark the stream
-as being "persistent" to allow send-once data to be preserved for the duration of a session.
+Propose the addition of a new state_update type **PERSISTENT** that will treat the data as being
+persistent to allow send-once data to be preserved for the duration of a session.
 
-For the 'snapshot' update, the stream data would replace existing data and become the new stream
-state. For the 'incremental' update, the stream data would be added to the current stream state.
-
-This means that a persistent stream has a single stream state, while non-persistent streams have
-state at each timestamp.
+In addition to the new update type we are adding an additional field to the stream_set,
+`no_data_streams`, that will be an explicit statement that this listed streams contain no data.
 
 # Motivation
 
-The majority of XVIZ data is time-based.
+The majority of XVIZ data is time-based but the need to send and display data that is persistent
+occurs frequently with map data.
 
-Today we only have two ways to control the valid duration of stream data, one at the Streetscape.gl
-level and one at the XVIZ level.
+Today we only have one way to control the valid duration of stream data, which is the XVIZ Config
+setting `TIME_WINDOW`.
 
 Streetscape.gl, and any XVIZ compliant viewer, can get the XVIZ Config `TIME_WINDOW` which can be
-set by the data source to determine the window of time that the viewer should inspect to find a
-stream datum. The first datum found should be the active datum for the current viewing time. This is
-an application wide mechanism so does not allow for individual stream control.
+set by the application to set the window of time that the viewer should inspect to find a stream
+datum. The first datum found should be the active datum for the current viewing time. This is an
+application wide mechanism so does not allow for individual stream control.
 
-XVIZ can control invalidating a stream datum by sending an empty stream in the 'snapshot' update
-message. The presence of a stream with no data is interpreted as invalidating any previous state at
-that time. This works per stream, and regardless of the actual TIME_WINDOW, but requires more
-tracking logic possibly in the XVIZ conversion process.
+This control is application wide and not stream specific, therefore we needed to add something at
+the data level to enable persistent data.
 
-Neither of these control mechanism allow for marking data as persistent during the whole session.
+In addition to adding persistent data, we want a way to invalidate persistent data in some way to
+provide some level of state management from the XVIZ data source.
 
 # Proposal
 
 In order to mark a stream as containing persistent data that should not be purged for the duration
-of of a session I propose the following.
+of a session I propose the following.
 
-Adding a stream metadata property:
+### 1. Add a new update_type **PERSISTENT** to the **state_update** message
 
-```
-persistent: [True|False] // False is default value
-```
+Any primitive data included in this state update should remain visible outside the TIME_WINDOW
+setting.
 
-If this property is present and **True**, then the data should be treated special by not dropping
-this stream during any purge operation of XVIZ data. The data should also remain visible outside the
-TIME_WINDOW setting.
+Only **primitives** are currently defined for the **PERSISTENT** message. Other XVIZ data types
+behavior is undefined with regard to this RFC. We will address them at a later date.
 
-Only the most recent value of the stream is required to be preserved, allowing updates to occur and
-old data to be purged while maintaining overall persistence at the stream level, but not at the
-individual stream object level.
+Specific features for a state_update message with the update_type **PERSISTENT**:
 
-If the update type is snapshot, the data is replaced. If the update type is incremental, the data
-will be added to the current datum.
+- A stream's data will be rendered regardless of the timestamp
+- If a new persistent message with the same stream name is seen it will replace the persistent state
+- If the stream name is present in the new `no_data_streams` entry, the persistent state will be
+  cleared
 
-## Example use-case
+For state_update messages with other update_types the behavior will be as follows:
 
-An example use-case for this feature would be map related features, such as lane lines or traffic
-set visual elements that do not move and should always be present.
+- If a new non-persistent message is seen with the same stream name that data will be ignored with
+  the persistent data taking precedence (and a warning should be logged)
 
-In order to represent such data today you have to either send the data with every update or go
-outside the XVIZ spec and provide persistent data at the application level with a custom
-implementation.
+### 2. Add a new field **no_data_streams** to the **stream_set**
 
-## Persistent Stream semantics
+The stream_set will have an additional field `no_data_streams` which will be an array of strings.
+Any stream name listed in this array will mark that stream as explicitly having no data.
 
-| Mode        | Stream Present                 | Stream Not Present   |
-| ----------- | ------------------------------ | -------------------- |
-| Snapshot    | Replaces existing stream state | Becomes stream state |
-| Incremental | Appends data to stream state   | Becomes stream state |
+Below is the behavior expected for each update_type:
 
-The primitive stream state `incremental` update will simply be appended to the current state array.
-If an incremental entry has an `id` that duplicates an existing entry no special handling is
-required.
+| update_type | Behavior                                                                                                                                                        |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| COMPLETE    | The stream will be marked at the message timestamp such that when searching within the `TIME_WINDOW` it would stop the search and register that stream as empty |
+| INCREMENTAL | The stream will be marked at the message timestamp such that when searching within the `TIME_WINDOW` it would stop the search and register that stream as empty |
+| PERSISTENT  | The persistent state associated with this stream name will be cleared                                                                                           |
+
+For the **COMPLETE** and **INCREMENTAL** update_types, the defined behavior is primarily to allow an
+XVIZ viewer to know that previous data is explicitly no longer valid and should not be displayed
+from this timestamp forward. Due to the way the `TIME_WINDOW` logic works data which is effectively
+no longer valid does not have a good way to signal that to the viewer. With this new field that can
+be reflected in the XVIZ message accruately.
+
+For an example of when this would be useful lets take a vehicle trajectory path. One could imagine a
+vehicle trajectory path is know based on the current state of the vehicle. However, in an emergency
+the vehicle state may change invalidating that trajectory. If there is no trajectory what is data do
+you sent? We considered sending a primitive with an empty vertices array but due to the various
+formats we support empty arrays are not robust enought to define that there is no data. Instead we
+have an explicit message to signal this case to ensure when data is no longer valid.
 
 # Out of scope
 
-- LOD considerations
-- Dynamic data management across front end and backend
+Persistence allows the data to break the time dependency, but there are other concerns around that
+are not part of this RFC.
+
+Below are a list of issue explicitly not part of this RFC or solution.
+
+### Level of Detail Considerations
+
+Since a primary use-case for this is map related data a related desire with other systems, such as
+tiles, it so enable a level of detail (LOD) as a way to manage data when visual details would be
+expensive or unnecessary due to the scale of the visualization.
+
+Since there is no camera information LOD cannot be addressed with this persistence proposal.
+
+### Dynamic data management across front end and backend
+
+Another requirement of many mapping solutions is to manage state which often requires viewport
+information that allows only the data visible to be fetched and stored. Since the proposed mechanism
+does not involve any dynamic viewport information there is no way to manage state based on the
+client interactions.
+
+State could be managed by any data available to the XVIZ source, such as vehicle position.
 
 # Alternatives
 
-The persistent flag is believe to be the simplest addition to enable session long data. Below are
-other options that have been considered and why they where not part of the proposal at this time.
+The persistent message is believed to be the simplest addition to enable session long data. Below
+are other options that have been considered and why they where not part of the proposal at this
+time.
 
-# retention property
+### Retention, or Time To Live
 
-The stream metadata will define a `retention` property for a stream, which can be used to override
-the application setting of TIME_WINDOW to instruct the application how long a given stream should be
-visible.
+A model seen in other projects has been to tag objects with a retention time. Persistence could be
+modeled by giving a very large retention value. However semantically separating out persistence from
+a retention time seems clearer, and has the effect of not complicating the state management for
+streams within state update. This is because since the update types are distinct the treatement of
+the data happens at the message level rather than at the stream level.
 
-I believe retention is inadequate for a persistence property for the following reasons:
+### Stream Metadata Property
 
-## Another time encoding
-
-retention encodes visibile time per datum which can be seen as a per-stream replacement for
-TIME_WINDOW at the XVIZ layer rather than the application layer. I could see retention **replacing**
-TIME_WINDOW possibly, but could still see the need for a persistent flag. This implies a semantic
-difference between the two. A sentinal value could "imply" persistence but that leads to the next
-issue.
-
-## Does not cover storage semantics
-
-A persistent flag defines the storage as only the most recent datum + increments should remain
-always.
-
-The retention which here was considered for the visible duration, would need to be developed to
-cover how it would interact with any data management. This to me signals that we are capturing
-something unique in persistence that deserves a semantically different property.
-
-# persistent update type
-
-A new update type that treated all data within the update as persistent could achieve the same
-result. However it becomes a requirement then to define the semantics of persistent update data with
-snapshot and incremental updates on a stream. Also, the semantics of adding to persistent data seems
-desirable, and separating out persistent as an update type from snapshot and increment seems we
-would loose the inherent value of those update types.
-
-The complexity of this one was abandoned in favor of the simpler stream property.
+We are moving to a more dynamic or incremental metadata model. Due to this direction we prefer not
+to add a new dependency on metadata for core functionality. Metadata is increasingly seen as an
+optimization, such as by reducing attributes or state that would otherwise be sent repeatedly.
